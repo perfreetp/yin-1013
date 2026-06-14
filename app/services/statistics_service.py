@@ -105,13 +105,24 @@ class StatisticsService:
         shift_type: str = "day"
     ) -> Tuple[List[ShiftHandoverItem], datetime, datetime]:
         now = datetime.now()
+        today_start = datetime(now.year, now.month, now.day)
 
-        if shift_type == "day":
-            start_time = datetime(now.year, now.month, now.day, 8, 0, 0)
-            end_time = datetime(now.year, now.month, now.day, 20, 0, 0)
-        else:
-            start_time = datetime(now.year, now.month, now.day, 20, 0, 0)
-            end_time = datetime(now.year, now.month, now.day + 1, 8, 0, 0)
+        try:
+            if shift_type == "day":
+                start_time = datetime(now.year, now.month, now.day, 8, 0, 0)
+                end_time = datetime(now.year, now.month, now.day, 20, 0, 0)
+            else:
+                start_time = datetime(now.year, now.month, now.day, 20, 0, 0)
+                end_time = today_start + timedelta(days=1)
+                end_time = datetime(end_time.year, end_time.month, end_time.day, 8, 0, 0)
+        except ValueError as e:
+            logger.error(f"Date calculation error: {e}")
+            if shift_type == "day":
+                start_time = today_start.replace(hour=8)
+                end_time = today_start.replace(hour=20)
+            else:
+                start_time = today_start.replace(hour=20)
+                end_time = (today_start + timedelta(days=1)).replace(hour=8)
 
         cases = await self.case_repo.get_shift_handover(start_time, end_time)
         items = []

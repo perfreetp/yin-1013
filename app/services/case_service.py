@@ -78,6 +78,11 @@ class CaseService:
         return case
 
     async def create_from_vehicle_video(self, request: VehicleVideoRequest) -> Case:
+        if request.record_end_time <= request.record_start_time:
+            raise BadRequestException(
+                message=f"录像结束时间({request.record_end_time})不能早于或等于开始时间({request.record_start_time})"
+            )
+
         case_number = await self.case_repo.generate_case_number()
 
         location = None

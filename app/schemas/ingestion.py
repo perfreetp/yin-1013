@@ -57,3 +57,25 @@ class IngestionResponse(BaseModel):
 
 class IngestionDataResponse(DataResponse[IngestionResponse]):
     pass
+
+
+class BatchIngestionResult(BaseModel):
+    index: int = Field(..., description="数据在批量中的索引")
+    source_type: Optional[str] = Field(None, description="来源类型")
+    success: bool = Field(..., description="是否成功")
+    case_id: Optional[int] = Field(None, description="成功时的案件ID")
+    case_number: Optional[str] = Field(None, description="成功时的案件编号")
+    error_reason: Optional[str] = Field(None, description="失败原因")
+
+
+class BatchIngestionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    total_count: int = Field(..., description="总数据条数")
+    success_count: int = Field(..., description="成功条数")
+    failed_count: int = Field(..., description="失败条数")
+    results: List[BatchIngestionResult] = Field(..., description="详细结果列表")
+
+
+class BatchIngestionDataResponse(DataResponse[BatchIngestionResponse]):
+    pass

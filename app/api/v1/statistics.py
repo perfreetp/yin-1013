@@ -1,10 +1,11 @@
 from typing import Optional
-from datetime import date
+from datetime import date, datetime, timedelta
 from fastapi import APIRouter, Depends, Request, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.models.user import User
+from app.models.case import Case
 from app.schemas.statistics import (
     DashboardResponse, DashboardOverview, HotSpotsResponse,
     ShiftHandoverResponse, NightMapResponse, DailyStatsResponse,
@@ -13,6 +14,7 @@ from app.schemas.statistics import (
 from app.schemas.common import DataResponse
 from app.services.statistics_service import StatisticsService
 from app.core.security import get_current_active_user, require_role
+from app.core.logger import logger
 
 router = APIRouter()
 
@@ -148,61 +150,79 @@ async def get_realtime_stats(
     db: AsyncSession = Depends(get_db)
 ):
     from app.repositories.case_repository import CaseRepository
-    from datetime import datetime, timedelta
 
     case_repo = CaseRepository(db)
     now = datetime.now()
     start_of_hour = datetime(now.year, now.month, now.day, now.hour, 0, 0)
     start_of_day = datetime(now.year, now.month, now.day)
 
-    stats = {
-        "current_hour": {
-            "received": await case_repo.count([Case.created_at >= start_of_hour]),
-            "handled": await case_repo.count([Case.handled_at >= start_of_hour]),
-            "pending": await case_repo.count([Case.status == "pending_review"])
-        },
-        "today": {
-            "received": await case_repo.count([Case.created_at >= start_of_day]),
-            "handled": await case_repo.count([Case.handled_at >= start_of_day]),
-            "closed": await case_repo.count([Case.closed_at >= start_of_day])
-        },
-        "by_source": {
-            "roadside_camera": await case_repo.count([
-                Case.source_type == "roadside_camera",
-                Case.created_at >= start_of_day
-            ]),
-            "vehicle_video": await case_repo.count([
-                Case.source_type == "vehicle_video",
-                Case.created_at >= start_of_day
-            ]),
-            "public_report": await case_repo.count([
-                Case.source_type == "public_report",
-                Case.created_at >= start_of_day
-            ])
-        },
-        "by_priority": {
-            "critical": await case_repo.count([
-                Case.priority == "critical",
-                Case.status.notin_(["closed", "dismissed"])
-            ]),
-            "high": await case_repo.count([
-                Case.priority == "high",
-                Case.status.notin_(["closed", "dismissed"])
-            ]),
-            "medium": await case_repo.count([
-                Case.priority == "medium",
-                Case.status.notin_(["closed", "dismissed"])
-            ]),
-            "normal": await case_repo.count([
-                Case.priority == "normal",
-                Case.status.notin_(["closed", "dismissed"])
-            ]),
-            "low": await case_repo.count([
-                Case.priority == "low",
-                Case.status.notin_(["closed", "dismissed"])
-            ])
-        }
+    empty_stats = {
+        "current_hour": {"received": 0, "handled": 0, "pending": 0},
+        "today": {"received": 0, "handled": 0, "closed": 0},
+        "by_source": {"roadside_camera": 0, "vehicle_video": 0, "public_report": 0},
+        "by_priority": {"critical": 0, "high": 0, "medium": 0, "normal": 0, "low": 0}
     }
+
+    try:
+        async def safe_count(filters):
+            try:
+                result = await case_repo.count(filters)
+                return result if result is not None else 0
+            except Exception as e:
+                logger.warning(f"Count query failed: {e}")
+                return 0
+
+        stats = {
+            "current_hour": {
+                "received": await safe_count([Case.created_at >= start_of_hour]),
+                "handled": await safe_count([Case.handled_at >= start_of_hour, Case.handled_at.isnot(None)]),
+                "pending": await safe_count([Case.status == "pending_review"])
+            },
+            "today": {
+                "received": await safe_count([Case.created_at >= start_of_day]),
+                "handled": await safe_count([Case.handled_at >= start_of_day, Case.handled_at.isnot(None)]),
+                "closed": await safe_count([Case.closed_at >= start_of_day, Case.closed_at.isnot(None)])
+            },
+            "by_source": {
+                "roadside_camera": await safe_count([
+                    Case.source_type == "roadside_camera",
+                    Case.created_at >= start_of_day
+                ]),
+                "vehicle_video": await safe_count([
+                    Case.source_type == "vehicle_video",
+                    Case.created_at >= start_of_day
+                ]),
+                "public_report": await safe_count([
+                    Case.source_type == "public_report",
+                    Case.created_at >= start_of_day
+                ])
+            },
+            "by_priority": {
+                "critical": await safe_count([
+                    Case.priority == "critical",
+                    Case.status.notin_(["closed", "dismissed"])
+                ]),
+                "high": await safe_count([
+                    Case.priority == "high",
+                    Case.status.notin_(["closed", "dismissed"])
+                ]),
+                "medium": await safe_count([
+                    Case.priority == "medium",
+                    Case.status.notin_(["closed", "dismissed"])
+                ]),
+                "normal": await safe_count([
+                    Case.priority == "normal",
+                    Case.status.notin_(["closed", "dismissed"])
+                ]),
+                "low": await safe_count([
+                    Case.priority == "low",
+                    Case.status.notin_(["closed", "dismissed"])
+                ])
+            }
+        }
+    except Exception as e:
+        logger.error(f"Realtime stats query failed: {e}")
+        stats = empty_stats
 
     return DataResponse(
         code=200,

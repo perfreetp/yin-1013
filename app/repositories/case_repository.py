@@ -244,6 +244,9 @@ class CaseRepository(BaseRepository[Case]):
         return [dict(row) for row in result.mappings().all()]
 
     async def get_night_hotspots(self, days: int = 30) -> List[dict]:
+        hour_col = func.extract('hour', Case.violation_time)
+        night_condition = or_(hour_col >= 20, hour_col <= 5)
+
         query = select(
             Case.location,
             Case.location_text,
@@ -255,7 +258,7 @@ class CaseRepository(BaseRepository[Case]):
             func.mode().within_group(Case.violation_type).label("most_common_violation")
         ).where(
             Case.created_at >= datetime.utcnow() - timedelta(days=days),
-            func.extract('hour', Case.violation_time).between(20, 5),
+            night_condition,
             Case.status != "dismissed"
         ).group_by(
             Case.location,
